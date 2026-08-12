@@ -1,0 +1,24 @@
+# ESP-IDF Partition Table (16 MB flash: M5Stack Core2)
+#
+# nvs / otadata / phy_init / ota_0 の先頭オフセットは partitions.csv /
+# partitions_16mb.csv と共通 — ブートローダが参照する固定オフセットなので
+# 変えないこと。ota_0 / ota_1 / storage のサイズも partitions_16mb.csv と
+# 同じ (アプリのコードベースは S3 版とほぼ共通で、既存ボードいずれも ota_0
+# 4MB を大きく下回っている実績があるため)。
+#
+# partitions_16mb.csv と異なり voice (HMM 音声合成) / model (esp-sr ASR)
+# パーティションは持たない。Core2 の最小構成 (sdkconfig.defaults.core2) は
+# 両機能とも OFF で、`storage` が実際には SPIFFS ではなく専用 NVS として
+# 使われている (顔バイトコード数 KB + 音声 DB 最大 480KiB) ため、8MB 級の
+# 領域を持たせても走査コスト・初回 erase 時間が伸びるだけで実利用がない
+# (components/avatar_vm/storage.cpp, main/voice_db.cpp 参照)。
+# 0x910000 以降 (約 7MB) は未割当のまま残す — 将来 voice/model 相当の
+# 機能を有効化する際に改めて表を切る。
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+ota_0,    app,  ota_0,   0x10000,  0x400000,
+ota_1,    app,  ota_1,   0x410000, 0x400000,
+storage,  data, spiffs,  0x810000, 0x100000,

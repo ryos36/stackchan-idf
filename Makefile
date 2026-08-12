@@ -1,6 +1,5 @@
 IDF_PATH    ?= $(HOME)/esp-idf/5.5.4
 IDF_EXPORTS  = $(IDF_PATH)/export.sh
-TARGET      ?= esp32s3
 
 # Board variant. Selects the PSRAM mode (Quad vs Octal) and per-board sdkconfig
 # overrides; the resulting firmware is NOT cross-compatible because PSRAM mode
@@ -16,6 +15,13 @@ TARGET      ?= esp32s3
 #              M5IOE1 IO expander + RX8130CE RTC + BMI270 IMU + 振動モータ.
 #              No PY32 / no Si12T / no nekomimi LED 配線. Servo I/O は背面
 #              2.54 mm バス経由のオプション (Phase 3).
+#   core2    — M5Stack Core2 (C008/v1.1): ESP32-D0WDQ6-V3 (Xtensa LX6、他は
+#              全て ESP32-S3!) + 16 MB flash + 8 MB 外付け PSRAM (ESP32 の
+#              アドレス空間制約で 4 MB のみマップ可) + 320×240 ILI9342C +
+#              FT6336 touch + AXP192 + NS4168 speaker + PDM mic + MPU6886 +
+#              BM8563。サーボ / カメラ / 会話 / BLE audio / RTP / ASR は
+#              全て OFF の最小プロファイル。★唯一の非 ESP32-S3 ボード —
+#              bootloader は 0x1000 起点、コンソールは UART0 (CP2104)。
 # Default cores3 keeps `make build` backward-compatible.
 BOARD       ?= cores3
 BUILD_DIR    = build-$(BOARD)
@@ -28,6 +34,30 @@ IDFPY_PORT   = $(if $(PORT),-p $(PORT))
 
 # Allow developers to keep local overrides in an untracked file.
 -include Makefile.local
+
+# Board → SoC target map. TARGET used to be a single global default
+# (esp32s3) with no relationship to BOARD — harmless while every board was
+# ESP32-S3, but `make build BOARD=core2` would silently build for the wrong
+# chip once a non-S3 board showed up. Each board is registered explicitly;
+# an unregistered BOARD is a hard error instead of a silent esp32s3 build
+# (mirrors board::profile_for's default-less switch: forgetting to register
+# is caught immediately, not discovered on hardware).
+BOARD_TARGET_cores3    := esp32s3
+BOARD_TARGET_atoms3r   := esp32s3
+BOARD_TARGET_atoms3    := esp32s3
+BOARD_TARGET_stopwatch := esp32s3
+BOARD_TARGET_core2     := esp32
+
+BOARD_TARGET := $(BOARD_TARGET_$(BOARD))
+ifeq (,$(BOARD_TARGET))
+$(error unknown BOARD "$(BOARD)": add BOARD_TARGET_$(BOARD) := <chip> to the map above)
+endif
+# An explicit TARGET= on the command line (or in Makefile.local) still wins;
+# warn if it disagrees with what the board actually needs.
+TARGET ?= $(BOARD_TARGET)
+ifneq ($(TARGET),$(BOARD_TARGET))
+$(warning TARGET=$(TARGET) overrides BOARD=$(BOARD)'s expected chip ($(BOARD_TARGET)))
+endif
 
 # Build sdkconfig defaults chains.
 #   - sdkconfig.defaults                  (committed, common)

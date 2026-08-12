@@ -39,15 +39,36 @@ public:
         // nekomimi strip over the M5-base PY32 ring (currently disabled —
         // JOURNAL: "M5 base 背面 NeoPixel … 完全に無効化中"); the PY32
         // path can come back via a separate accessor without disturbing
-        // this one. StopWatch (C152) has no nekomimi wiring at all — leave
-        // led_ as nullptr so app_main / led_task null-check naturally.
-        if (kind_ == BoardKind::StopWatch) {
-            return;
+        // this one.
+        //
+        // Opt-in switch, not an exclusion list: a new BoardKind defaults to
+        // "no strip" unless explicitly wired here. The excluded-board
+        // version of this used to inherit CoreS3's GPIO9 for anything not
+        // named StopWatch — harmless on ESP32-S3 boards, but GPIO9 is the
+        // internal SPI flash's SD_DATA2 on ESP32 (Core2), so silently
+        // driving RMT output there would corrupt the flash bus instead of
+        // just leaving the ears dark. No default: case — a new BoardKind
+        // that forgets to appear here is a -Wswitch build error, not a
+        // hardware incident.
+        int gpio = -1;
+        switch (kind_) {
+        case BoardKind::M5Base:
+        case BoardKind::TakaoBase:
+            gpio = NekomimiLedStrip::kDataGpioCoreS3;
+            break;
+        case BoardKind::AtomNyan:
+        case BoardKind::AtomS3:
+            gpio = NekomimiLedStrip::kDataGpioAtomNyan;
+            break;
+        case BoardKind::StopWatch: // no nekomimi wiring
+        case BoardKind::Core2:     // no nekomimi wiring
+            break;
         }
-        const int gpio = (kind_ == BoardKind::AtomNyan)
-                             ? NekomimiLedStrip::kDataGpioAtomNyan
-                             : NekomimiLedStrip::kDataGpioCoreS3;
-        led_ = std::make_unique<NekomimiLedStrip>(gpio);
+        if (gpio >= 0) {
+            led_ = std::make_unique<NekomimiLedStrip>(gpio);
+        }
+        // led_ stays nullptr for boards without wiring — app_main / led_task
+        // null-check naturally.
     }
 
     BoardKind kind() const noexcept { return kind_; }
@@ -152,6 +173,26 @@ tl::expected<Board, Error> Board::begin()
                             : "AtomNyan (AtomS3R + Atomic ECHO BASE)");
         return board;
     }
+    // M5Stack Core2 — picked up from M5Unified's board ID like the Atom /
+    // StopWatch branches above. This check MUST stay before the CoreS3 tail
+    // below: Si12tTouch::probe() writes to 0x68 without verifying a chip ID
+    // first, and Core2's internal I2C has an MPU6886 IMU at that address —
+    // falling through would stomp the IMU's config registers and hand a
+    // phantom touch sensor to callers.
+    if (m5_board == m5::board_t::board_M5StackCore2) {
+        // 320×240 ILI9342C. M5GFX autodetects the panel / backlight / FT6336
+        // touch by probing AXP192 on the internal I2C bus — no Arduino
+        // define needed, works the same under ESP-IDF. Rotation 1 matches
+        // the CoreS3 landscape orientation (USB-C on the right edge).
+        M5.Display.setRotation(1);
+        Board board;
+        board.impl_ = std::make_shared<Impl>(BoardKind::Core2,
+                                             std::optional<Py32Expander>{},
+                                             std::optional<Si12tTouch>{});
+        ESP_LOGI(kTag, "board initialized: kind=Core2 "
+                       "(320x240 ILI9342C, AXP192, no PY32/Si12T/nekomimi/servo)");
+        return board;
+    }
     // CoreS3: landscape, USB-C on the right edge.
     M5.Display.setRotation(1);
 
@@ -228,11 +269,15 @@ BoardProfile profile_for(BoardKind kind) noexcept
     case BoardKind::M5Base:
         p.has_servo_bus = true;
         p.has_camera = true; // GC0308 on the CoreS3 mainboard
+        p.has_mbus_module_audio = true;
+        p.has_m5base_i2c_chips = true;
         break;
     case BoardKind::TakaoBase:
         p.has_servo_bus = true;
         // CoreS3 SE (the usual Takao host) has no camera; keep it off until
         // a camera-equipped Takao build shows up.
+        p.has_mbus_module_audio = true;
+        p.has_m5base_i2c_chips = true;
         break;
     case BoardKind::AtomNyan:
     case BoardKind::AtomS3:
@@ -245,20 +290,40 @@ BoardProfile profile_for(BoardKind kind) noexcept
         p.btn_a_toggles_ui = true;
         p.touch_gaze_follow = true;
         break;
+    case BoardKind::Core2:
+        // Every field's default is already correct for this board: 320×240
+        // touch panel with the same button-strip mapping as CoreS3 (no
+        // button_overlay_ui), no servo bus (no extension base), no camera,
+        // NS4168 amp driven at M5Unified's factory magnification (0 = don't
+        // override). has_mbus_module_audio stays false even though Core2
+        // does have an M-BUS header — Module Audio's I2S override pins
+        // collide with GPIOs ESP32 reserves for the internal flash bus, see
+        // app_main's Module Audio probe branch. has_m5base_i2c_chips also
+        // stays false: Core2's internal I2C 0x34 is an AXP192, not the
+        // AXP2101 the i2c_dump diagnostic (and its write-probe recovery
+        // logic) is written against — confirmed on hardware that letting it
+        // run there clobbers AXP192 reg 0x90 (GPIO0 / external power
+        // enable), not the AXP2101 DLDO1 bit it thinks it's touching. Empty
+        // case is intentional, not a placeholder.
+        break;
     }
     return p;
 }
 
 ServoBusConfig Board::servo_bus_config() const noexcept
 {
-    if (impl_->kind() == BoardKind::AtomNyan ||
-        impl_->kind() == BoardKind::AtomS3 ||
-        impl_->kind() == BoardKind::StopWatch) {
-        // No on-board servo bus on these variants — the servo task is not
-        // started. Return a syntactically valid but inert config so callers
-        // that read this defensively don't see junk. (StopWatch *can* drive
-        // an external servo via the back-side 2.54 mm bus UART0=G43/G44, but
-        // that's a Phase-3 opt-in route; default profile keeps it inert.)
+    // Wiring presence is BoardProfile::has_servo_bus, a single source of
+    // truth — no second per-board exclusion list here. A board that's
+    // has_servo_bus=false in profile_for() but forgotten from an exclusion
+    // list here would otherwise fall through to the M5-base G6/G7 return
+    // below and open a UART on GPIOs that may not even exist as wired
+    // (e.g. Core2 has no servo bus and, being ESP32 not ESP32-S3, G6/G7 are
+    // reserved for the internal flash anyway).
+    if (!profile_for(impl_->kind()).has_servo_bus) {
+        // Syntactically valid but inert config so callers that read this
+        // defensively don't see junk. (StopWatch *can* drive an external
+        // servo via the back-side 2.54 mm bus UART0=G43/G44, but that's a
+        // Phase-3 opt-in route; default profile keeps it inert.)
         return {UART_NUM_1, GPIO_NUM_NC, GPIO_NUM_NC, 0u, /*echo_cancel=*/false};
     }
     if (impl_->kind() == BoardKind::TakaoBase) {

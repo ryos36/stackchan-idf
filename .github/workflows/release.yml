@@ -45,7 +45,7 @@ jobs:
       # artifacts though, so a partial success still won't publish.
       fail-fast: false
       matrix:
-        board: [cores3, atoms3r, atoms3, stopwatch]
+        board: [cores3, atoms3r, atoms3, stopwatch, core2]
     container:
       # Pinned to v5.5 to match local development. v6.0 dropped the built-in
       # `json` (cJSON) component in favour of an IDF component-manager

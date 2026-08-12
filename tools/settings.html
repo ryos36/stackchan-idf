@@ -1222,12 +1222,11 @@ const CHR_JTTS_SAY = 'e3f0a02d-7b1c-4d2a-9e6f-2c5a8d4b1f00';
 //   0xff reset  ()         (revert to firmware-embedded default)
 const CHR_AVATAR_BC = 'e3f0a021-7b1c-4d2a-9e6f-2c5a8d4b1f00';
 // Board facts (labels / capabilities / firmware-ZIP slug) live in
-// settings_common.js — window.StackchanSettings.BOARDS.
-const BOARD_M5_BASE = 0;
-const BOARD_TAKAO_BASE = 1;
-const BOARD_ATOM_NYAN = 2;
-const BOARD_ATOM_S3 = 3;
-const BOARD_STOPWATCH = 4;
+// settings_common.js — window.StackchanSettings.BOARDS. No per-kind
+// constants here: settings_wifi.html already gates on BOARDS[kind].servo /
+// .battery directly, and this page used to keep a second BOARD_* constant
+// list that had to be updated in lockstep (and wasn't — see the Core2 port
+// notes). One table, one place to add a board.
 const CHR_JTTS    = 'e3f0a008-7b1c-4d2a-9e6f-2c5a8d4b1f00';
 const CHR_OTA_CTRL = 'e3f0a009-7b1c-4d2a-9e6f-2c5a8d4b1f00';
 const CHR_OTA_DATA = 'e3f0a00a-7b1c-4d2a-9e6f-2c5a8d4b1f00';
@@ -1853,23 +1852,18 @@ function applyCapabilityGating() {
   // Per-board gating: hide controls for hardware the board doesn't carry.
   // Older firmware that doesn't expose CHR_BOARD_KIND leaves boardKind = null
   // → fall back to the historical M5-base assumption (everything visible) so
-  // we don't regress those installs.
-  // No-servo boards: AtomS3R / AtomS3 / StopWatch all lack the M5 base servo
-  // bus (StopWatch's back-side UART0 servo route is Phase-3 opt-in and not
-  // surfaced here yet).
-  const noServo = (boardKind === BOARD_ATOM_NYAN) ||
-                  (boardKind === BOARD_ATOM_S3) ||
-                  (boardKind === BOARD_STOPWATCH);
+  // we don't regress those installs. Driven off StackchanSettings.BOARDS
+  // (same table settings_wifi.html's applyBoardGating() uses) instead of a
+  // second per-kind constant list — adding a board only needs the one entry
+  // in settings_common.js.
+  const boardInfo = boardKind != null ? StackchanSettings.BOARDS[boardKind] : null;
+  const noServo = boardInfo ? !boardInfo.servo : false;
   document.getElementById('servo-section').style.display = noServo ? 'none' : '';
   if (noServo) {
     setVisible('label.toggle-label[for="servo-enabled"]', false);
     setVisible('label.toggle-label[for="servo-enabled"] + p.hint', false);
   }
-  // Battery telemetry: M5 base = INA226, StopWatch = M5PM1 PMIC (M5Unified
-  // M5.Power surfaces it). Takao / AtomNyan / AtomS3 = none.
-  const noBattery = (boardKind === BOARD_TAKAO_BASE) ||
-                    (boardKind === BOARD_ATOM_NYAN) ||
-                    (boardKind === BOARD_ATOM_S3);
+  const noBattery = boardInfo ? !boardInfo.battery : false;
   document.getElementById('dis-battery-row').style.display = noBattery ? 'none' : '';
   if (noBattery) {
     setVisible('label.toggle-label[for="bat-gauge-enabled"]', false);

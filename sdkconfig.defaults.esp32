@@ -1,0 +1,51 @@
+# ESP32 (Xtensa LX6, "classic") family common defaults. Currently only the
+# M5Stack Core2 board uses this — chained after sdkconfig.defaults and before
+# sdkconfig.defaults.core2 (chained last). Same role and grain as
+# sdkconfig.defaults.esp32s3.
+
+CONFIG_IDF_TARGET="esp32"
+
+# --- Console ---------------------------------------------------------------
+# ESP32 has no USB-Serial-JTAG peripheral (S3/C3-and-later feature); the
+# esp32s3 default (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG) doesn't exist on this
+# target. Core2's console is UART0 through the on-board CP2104 USB-UART
+# bridge (115200 8N1) — IDF's own default, so no explicit setting needed
+# beyond making sure the esp32s3 knob isn't inherited (it can't be — this
+# file replaces sdkconfig.defaults.esp32s3 in the chain, not layers on it).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# --- PSRAM -------------------------------------------------------------
+# ESP32 has no in-package PSRAM; Core2 wires an external chip onto the same
+# SPI bus as flash. Chip type is confirmed from M5Stack's published spec
+# (8 MB) and the ESP-PSRAM64/64H family this die size normally ships as
+# (64 Mbit, SOP8, 3.3V) — set explicitly rather than left to
+# SPIRAM_TYPE_AUTO's runtime probe, since the physical part is already known.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_TYPE_ESPPSRAM64=y
+# 40 MHz, not 80. 80 MHz requires both PSRAM and flash to run at 80 MHz and
+# is sensitive to board trace length; which speed M5Stack's own firmware
+# uses on Core2 is unconfirmed, and chip revision 1 boards (see
+# CONFIG_SPIRAM_CACHE_WORKAROUND below) make 80 MHz timing margins worse.
+# This setting feeds the panel framebuffer read bandwidth directly, so it's
+# the first thing to revisit if on-device fps falls short.
+CONFIG_SPIRAM_SPEED_40M=y
+# Bank-switching (himem) off — ESP32 only maps 4 MB of the 8 MB PSRAM into
+# data space to begin with, and enabling BANKSWITCH reserves part of that
+# 4 MB for the himem API this firmware doesn't use, shrinking the malloc
+# pool for no benefit.
+CONFIG_SPIRAM_BANKSWITCH_ENABLE=n
+#
+# NOTE: CONFIG_SPIRAM_CACHE_WORKAROUND is intentionally left at its IDF
+# default (y — active whenever ESP32_REV_MIN_FULL < 300). It applies
+# -mfix-esp32-psram-cache-issue across the whole build (code size and
+# runtime cost, not just a runtime flag) and covers chip revision 1 (Core2
+# v1.0) as well as revision 3 (v1.1, -V3). Turning it off requires knowing
+# the actual silicon on hand, so it stays IDF-default until confirmed on
+# hardware — see docs/adding_a_board.md-equivalent notes in the Core2 port
+# plan, risk R6.
+#
+# NOTE: memory tuning (SPIRAM_MALLOC_ALWAYSINTERNAL, MBEDTLS_*, Wi-Fi buffer
+# counts) belongs in the common sdkconfig.defaults only, never here — this
+# file chains after it, so any value set here would silently override the
+# common one. Same discipline as sdkconfig.defaults.esp32s3's NOTE.

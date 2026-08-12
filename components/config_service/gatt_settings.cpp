@@ -205,9 +205,10 @@ static const ble_uuid128_t kServoPositionsUuid = BLE_UUID128_INIT(
     0x00, 0x1f, 0x4b, 0x8d, 0x5a, 0x2c, 0x6f, 0x9e,
     0x2a, 0x4d, 0x1c, 0x7b, 0x1a, 0xa0, 0xf0, 0xe3);
 // BoardKind — encrypted READ-only 1-byte board variant indicator. Mirrors
-// board::BoardKind: 0 = M5Base, 1 = TakaoBase, 2 = AtomNyan. Lets the web UI
-// hide sections that don't apply on the current hardware (servo config on
-// Atom-nyan, battery gauge where there's no battery, etc.).
+// board::BoardKind: 0 = M5Base, 1 = TakaoBase, 2 = AtomNyan, 3 = AtomS3,
+// 4 = StopWatch, 5 = Core2. Lets the web UI hide sections that don't apply
+// on the current hardware (servo config on Atom-nyan, battery gauge where
+// there's no battery, etc.).
 static const ble_uuid128_t kBoardKindUuid = BLE_UUID128_INIT(
     0x00, 0x1f, 0x4b, 0x8d, 0x5a, 0x2c, 0x6f, 0x9e,
     0x2a, 0x4d, 0x1c, 0x7b, 0x1b, 0xa0, 0xf0, 0xe3);

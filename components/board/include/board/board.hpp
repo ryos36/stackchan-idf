@@ -11,6 +11,8 @@
 #include <driver/gpio.h>
 #include <driver/uart.h>
 
+#include "board/board_kind.hpp"
+
 namespace stackchan::board {
 
 enum class Error {
@@ -25,30 +27,6 @@ enum class Error {
     // failed when both PY32 and RMT strips coexist.
     LedStripIo,
 };
-
-// Which Stack-chan base board the SoC is mounted on. Detected at begin() —
-// CoreS3 variants discriminate on the M5 base's PY32 IO expander (0x6F);
-// AtomS3R variants ("Atom-nyan") are picked up from M5Unified's chip ID.
-enum class BoardKind {
-    M5Base,    // M5Stack Stack-chan base: PY32 servo-power EN, INA226 battery, servo on G6/G7.
-    TakaoBase, // Takao Base (CoreS3 SE port A): half-duplex servos on port A, no power/battery control.
-    AtomNyan,  // AtomS3R + Atomic ECHO BASE: 128x128 LCD, ES8311 codec, no servo/battery/LED/touch.
-    AtomS3,    // Plain AtomS3 (no PSRAM) + Atomic ECHO BASE: avatar / jtts / LED only, no conv/audio-stream.
-    StopWatch, // M5 StopWatch (C152): 466×466 AMOLED 円形 + CST820B touch + ES8311 + M5PM1 PMIC + M5IOE1.
-               // No PY32 / no INA226 / no Si12T / no nekomimi LED 配線. Servo は背面 UART0 経由の Phase 3 オプション.
-};
-
-// WIRE-FORMAT CONTRACT: the numeric values above are externally visible —
-// BLE chr "BoardKind" serves static_cast<uint8_t>(kind) to paired web UIs,
-// and wifi_config_service's release-OTA maps the same byte to a firmware
-// slug (cores3/atoms3r/atoms3/stopwatch). Never reorder or renumber; append
-// new boards at the end only.
-static_assert(static_cast<int>(BoardKind::M5Base) == 0 &&
-              static_cast<int>(BoardKind::TakaoBase) == 1 &&
-              static_cast<int>(BoardKind::AtomNyan) == 2 &&
-              static_cast<int>(BoardKind::AtomS3) == 3 &&
-              static_cast<int>(BoardKind::StopWatch) == 4,
-              "BoardKind numbering is a BLE/OTA wire contract — append only");
 
 // Per-board static traits, resolved once from the detected BoardKind. This
 // collects every "which board am I?" decision that used to live as scattered
@@ -83,6 +61,26 @@ struct BoardProfile {
     // GC0308 DVP camera wired (CoreS3 mainboard on the M5 base). The
     // CONFIG_STACKCHAN_CAMERA_ENABLED compile gate applies on top.
     bool has_camera = false;
+    // M-BUS header present and wired the way M5Stack Module Audio (M144,
+    // ES8388) expects — gates the runtime ES8388 probe in app_main. Boards
+    // that never had an M-BUS (AtomNyan/AtomS3/StopWatch) can't physically
+    // have the module attached, so skipping the probe there is free.
+    // Core2 DOES have an M-BUS but the module's I2S override pins (see
+    // app_main's Module Audio branch) collide with ESP32's flash-reserved
+    // GPIOs, so it stays false there too until that's worked out.
+    bool has_mbus_module_audio = false;
+    // Internal I2C bus carries the AXP2101 PMIC / AW9523 IO expander / PY32
+    // — the M5 Stack-chan base (CoreS3) chip set that i2c_dump.cpp's
+    // diagnostic dump and "AXP2101 write probe" recovery logic are written
+    // against. Gates the dump_internal_i2c_registers() call in app_main.
+    // MUST stay false on any board without a confirmed AXP2101 at 0x34:
+    // the write probe writes 0xBF to reg 0x90 whenever it sees a mismatch
+    // on reg 0x03, with no chip-identity check beyond that. On Core2
+    // (AXP192 at the same address) this clobbered GPIO0 — the external
+    // power (M-BUS/Port A) enable bit — because AXP192's reg 0x90 is an
+    // unrelated GPIO0 function-select register. See the Core2 port plan's
+    // "AXP192 への誤書き込み" section for the full trace.
+    bool has_m5base_i2c_chips = false;
 };
 
 // The static profile for a detected board. Pure function of the enum — the

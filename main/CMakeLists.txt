@@ -8,7 +8,6 @@ set(_main_priv_reqs
     jtts
     telegram
     espressif__esp_audio_codec
-    espressif__esp-sr
     json
     M5Unified
     M5GFX
@@ -24,6 +23,17 @@ set(_main_priv_reqs
     espnow_poc
     espnow_remote
 )
+
+# esp-sr (WakeNet/AFE) targets esp32s3/esp32p4 only (main/idf_component.yml's
+# `rules:` already excludes esp32 from dependency resolution) — mirror that
+# exclusion here so the esp32 (Core2) build doesn't try to link a component
+# manager never fetched. IDF_TARGET is set at CMake configure time (unlike
+# CONFIG_* Kconfig values, which aren't available yet — see the slim-build
+# comment below), so this condition is safe in the early-expansion REQUIRES
+# list.
+if(NOT IDF_TARGET STREQUAL "esp32")
+    list(APPEND _main_priv_reqs espressif__esp-sr)
+endif()
 
 # Slim-build per-source gates. The PRIV_REQUIRES list above can't be made
 # conditional on Kconfig (ESP-IDF's early-expansion phase evaluates REQUIRES

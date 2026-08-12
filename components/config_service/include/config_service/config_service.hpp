@@ -311,10 +311,10 @@ void notify_wifi_connected(bool connected);
 void notify_battery(int millivolts, int milliamps, int percent);
 
 // Tell the settings service which hardware variant we booted on. The byte
-// value mirrors board::BoardKind (0=M5Base, 1=TakaoBase, 2=AtomNyan) and is
-// surfaced via the BoardKind READ characteristic so the web UI can hide
-// sections that don't apply (e.g. servo configuration on Atom-nyan). Set
-// once at boot before BLE comes online.
+// value mirrors board::BoardKind (0=M5Base, 1=TakaoBase, 2=AtomNyan,
+// 3=AtomS3, 4=StopWatch, 5=Core2) and is surfaced via the BoardKind READ
+// characteristic so the web UI can hide sections that don't apply (e.g.
+// servo configuration on Atom-nyan). Set once at boot before BLE comes online.
 void set_board_kind(std::uint8_t kind);
 
 // True while a BLE central is connected. Thread-safe; for status display.

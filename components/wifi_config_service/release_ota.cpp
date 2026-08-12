@@ -21,6 +21,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
+#include <board/board_kind.hpp>
 #include <config_service/ota.hpp>
 
 namespace stackchan::wifi_config::release_ota {
@@ -208,18 +209,23 @@ void worker(void* arg)
 
 const char* board_slug(std::uint8_t board_kind)
 {
-    // Order MUST match board::BoardKind: M5Base=0, TakaoBase=1, AtomNyan=2,
-    // AtomS3=3, StopWatch=4. M5Base and TakaoBase both flash the cores3
-    // build (same ESP32-S3 + servo bus pinning is a runtime detection
-    // detail, not a per-binary one).
-    switch (board_kind) {
-    case 0:  return "cores3";    // M5Base
-    case 1:  return "cores3";    // TakaoBase
-    case 2:  return "atoms3r";   // AtomNyan
-    case 3:  return "atoms3";    // AtomS3 slim
-    case 4:  return "stopwatch"; // M5 StopWatch C152
-    default: return nullptr;
+    // Switched on the actual enum, not the raw byte, and with no default:
+    // case. A BoardKind value that isn't listed here is a -Wswitch build
+    // error, not a silent nullptr at OTA time — the same discipline as
+    // board::profile_for()'s switch. M5Base and TakaoBase both flash the
+    // cores3 build (same ESP32-S3 binary; the servo bus pinning difference
+    // is a runtime detection detail, not a per-binary one). Core2 gets its
+    // own slug because it's a different chip (ESP32, not ESP32-S3) and
+    // therefore a genuinely different binary.
+    switch (static_cast<board::BoardKind>(board_kind)) {
+    case board::BoardKind::M5Base:    return "cores3";
+    case board::BoardKind::TakaoBase: return "cores3";
+    case board::BoardKind::AtomNyan:  return "atoms3r";
+    case board::BoardKind::AtomS3:    return "atoms3";
+    case board::BoardKind::StopWatch: return "stopwatch";
+    case board::BoardKind::Core2:     return "core2";
     }
+    return nullptr; // out-of-range byte (e.g. newer firmware talking to an older UI)
 }
 
 tl::expected<void, StartError> start(const std::string& tag,

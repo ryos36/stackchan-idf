@@ -25,6 +25,7 @@
     2: { label: 'AtomS3R + Atomic ECHO BASE',       slug: 'atoms3r',   servo: false, battery: false },
     3: { label: 'AtomS3 + Atomic ECHO BASE (slim)', slug: 'atoms3',    servo: false, battery: false },
     4: { label: 'M5 StopWatch (C152)',              slug: 'stopwatch', servo: false, battery: true  },
+    5: { label: 'M5Stack Core2',                    slug: 'core2',     servo: false, battery: false },
   };
 
   function boardLabel(kind) {

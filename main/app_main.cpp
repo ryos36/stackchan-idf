@@ -238,13 +238,23 @@ extern "C" void app_main()
 #endif // CONFIG_STACKCHAN_CONVERSATION_ENABLED
 
     // Diagnostic register dump of the internal-I2C chips (AXP2101 / AW9523 /
-    // PY32). Read-only; needed for debugging the recurring "LCD backlight off
-    // after LED init" issue — the dump captures whatever state the chips
-    // landed in at boot so we can diff against a healthy boot. Runs BEFORE
-    // any LED / PY32 access in the rest of app_main so the snapshot reflects
-    // the post-corruption state we want to investigate, not a fresh-write
-    // state we created ourselves.
-    stackchan::app::dump_internal_i2c_registers();
+    // PY32) — the M5 Stack-chan base (CoreS3) chip set; needed for debugging
+    // the recurring "LCD backlight off after LED init" issue. The dump
+    // captures whatever state the chips landed in at boot so we can diff
+    // against a healthy boot. Runs BEFORE any LED / PY32 access in the rest
+    // of app_main so the snapshot reflects the post-corruption state we
+    // want to investigate, not a fresh-write state we created ourselves.
+    //
+    // Gated on has_m5base_i2c_chips: boards without a confirmed AXP2101 at
+    // 0x34 must not run this. Its "AXP2101 write probe" recovery path (see
+    // i2c_dump.cpp) writes reg 0x90 whenever reg 0x03 doesn't read back the
+    // AXP2101's hard-wired 0x4A, with no chip-identity check beyond that.
+    // On Core2 (AXP192 at the same address) this fired and clobbered
+    // AXP192 reg 0x90 — GPIO0, which controls external power (M-BUS/Port A)
+    // enable on this board, not the AXP2101 DLDO1 bit it was written for.
+    if (profile.has_m5base_i2c_chips) {
+        stackchan::app::dump_internal_i2c_registers();
+    }
 
     // NVS init + config load — moved ahead of the camera init so the ASR
     // mode can gate the (internal/DMA-RAM-hungry) DVP camera off. ASR
@@ -299,7 +309,8 @@ extern "C" void app_main()
     stackchan::app::settings_sinks::set_say_options(stackchan::app::resolve_speech_options(
         cfg.jtts_config_json, stackchan::app::Speech::kSampleRate));
 
-    // Module Audio (M144, ES8388 codec): probe once at boot. With its
+    // Module Audio (M144, ES8388 codec): probe once at boot, gated on
+    // profile.has_mbus_module_audio (M5Base/TakaoBase only). With its
     // jumpers in Config B the codec listens on the M-BUS I2S; the host
     // re-routes its single I2S to the module's pins below (the codec
     // and the internal AW88298 / ES7210 can't run at the same time —
@@ -307,7 +318,16 @@ extern "C" void app_main()
     //   Auto         → codec_present ? module : internal
     //   Internal     → internal even if codec_present
     //   ModuleAudio  → module if codec_present, else warn and use internal
-    const bool codec_present = stackchan::board::es8388::probe();
+    //
+    // The gate matters beyond skipping a redundant I2C probe: further down
+    // (the I2S pin override block) this path drives spk.pin_ws = GPIO_NUM_6
+    // / spk.pin_mck = GPIO_NUM_7, which are free GPIOs on the CoreS3-class
+    // ESP32-S3 boards this was written for but are the internal SPI flash's
+    // pins on ESP32 (Core2). Core2 does have an M-BUS header the module can
+    // physically plug into, so without this gate a fitted module would
+    // drive those pins straight into the flash bus.
+    const bool codec_present =
+        profile.has_mbus_module_audio && stackchan::board::es8388::probe();
     const bool effective_audio_module =
         codec_present && (cfg.audio_output == stackchan::config::AudioOutput::Auto ||
                           cfg.audio_output == stackchan::config::AudioOutput::ModuleAudio);

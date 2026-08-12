@@ -1,0 +1,61 @@
+# M5Stack Core2 (C008 / v1.1) — ESP32-D0WDQ6-V3 + 8 MB 外付け PSRAM (4MB
+# マップ可) + 16 MB flash + 320×240 ILI9342C + FT6336 touch + AXP192 +
+# NS4168 speaker + PDM mic + MPU6886 + BM8563。`make build BOARD=core2` で
+# 選択 (TARGET=esp32 は Makefile のボード→ターゲット マップ経由)。
+#
+# 最小プロファイル: アバター + 設定 UI (BLE/Wi-Fi) + jtts (formant/unit)。
+# サーボなし (拡張ベース非対応、かつ ESP32 では G6/G7 が内蔵フラッシュ専用)、
+# 会話 / BLE audio / RTP / カメラ / ASR は全て OFF。sdkconfig.defaults.atoms3
+# の機能ゲート構成を、PSRAM 有り版として踏襲する。
+
+# --- Flash -----------------------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# --- パーティション表 --------------------------------------------------------
+# Core2 専用表 (partitions_core2.csv 冒頭コメント参照): ota_0/ota_1/storage は
+# 既存 16MB 表と同サイズ、voice (HMM) / model (ASR) は持たない (下記ゲートで
+# 両機能とも OFF のため)。
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_core2.csv"
+
+# --- 機能ゲート ---------------------------------------------------------------
+# main/Kconfig.projbuild の定義。効き先は main/app_main.cpp と
+# main/CMakeLists.txt:62-77。デフォルト y のものだけ明示的に n にする
+# (CONVERSATION / AUDIO_STREAM / WIFI_AUDIO / ESPNOW_REMOTE)。
+CONFIG_STACKCHAN_CONVERSATION_ENABLED=n
+CONFIG_STACKCHAN_AUDIO_STREAM_ENABLED=n
+CONFIG_STACKCHAN_WIFI_AUDIO_ENABLED=n
+# ESP-NOW リモコンはサーボ駆動が目的の機能。サーボが無い本プロファイルでは
+# 意味が無いので落として esp-now 依存ごと外す。
+CONFIG_STACKCHAN_ESPNOW_REMOTE_ENABLED=n
+# 以下はデフォルトが既に n — 将来の変更に備えて明示しておく
+# (components/board/Kconfig, main/Kconfig.projbuild)。
+CONFIG_STACKCHAN_CAMERA_ENABLED=n
+CONFIG_STACKCHAN_ASR_ENABLED=n
+CONFIG_JTTS_ENABLE_HMM=n
+
+# --- CPU ---------------------------------------------------------------------
+# IDF の ESP32 既定は 160 MHz (ESP32-S3 系ボードは既定の 240 MHz のまま
+# 触っていない)。ESP32 の SPI DMA は PSRAM を読めないため、PSRAM フレーム
+# バッファのパネル転送が CPU レジスタ ポーリングに落ちる (Core2 移植プラン
+# の描画パス節 / リスク R2 参照)。240 MHz にしてポーリング オーバヘッドを
+# 減らす — それでも fps が足りなければ Phase 3 でバンドステージングを検討。
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# --- コード サイズ -------------------------------------------------------
+# ESP32 の IRAM0 は 128 KiB 固定 (ESP32-S3 より小さい) で、共通
+# sdkconfig.defaults.esp32 の SPIRAM_CACHE_WORKAROUND (rev1 対応、IDF 既定
+# のまま維持) がキャッシュ問題回避のため libc/FreeRTOS/heap/SPI flash 等の
+# 一部関数を IRAM に強制配置する。-O2 (共通 sdkconfig.defaults の
+# COMPILER_OPTIMIZATION_PERF) のままだと IRAM0 セグメントが数 KiB 溢れて
+# リンクが通らない (実測: 3496 B 超過)。-Os に切り替えてコードサイズを
+# 削り、ワークアラウンドは弱めない — 実行速度への影響は Phase 2 で実測。
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# --- ブートローダ --------------------------------------------------------------
+# ESP32 のブートローダ領域は 0x1000〜0x8000 = 28 KiB (S3 は 0x0 起点で 32 KiB)。
+# PSRAM 初期化 + BOOTLOADER_APP_ROLLBACK_ENABLE (共通 sdkconfig.defaults) +
+# SPIRAM_CACHE_WORKAROUND (sdkconfig.defaults.esp32、リビジョン未確定分の
+# ワークアラウンド込み) でここに収まるか未検証 — 溢れたら
+# BOOTLOADER_LOG_LEVEL_WARN や BOOTLOADER_COMPILER_OPTIMIZATION_SIZE を追加。
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

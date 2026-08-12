@@ -30,6 +30,12 @@ idf_component_register(
         json
         mbedtls
         espressif__mdns
+        # board: only for board_kind.hpp's BoardKind enum in release_ota.cpp
+        # (board_slug()'s switch). That header is dependency-free by design
+        # (see its own comment) even though the rest of the `board`
+        # component pulls in M5Unified/M5GFX — PRIV_REQUIRES here doesn't
+        # re-export those to wifi_config_service's own public headers.
+        board
     # NB: settings_wifi.html is NOT listed in EMBED_TXTFILES; the in-page
     # Avatar DSL editor needs the JS compiler bundle inlined into it, which
     # is done by `tools/avatar_dsl/inject.mjs` at build time. The processed

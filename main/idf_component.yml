@@ -15,4 +15,12 @@ dependencies:
   # [ASR Phase 0] esp-sr: on-device wake word (WakeNet) + AFE. Fetched
   # always but only used when CONFIG_STACKCHAN_ASR_ENABLED (models selected
   # via menuconfig → flashed to the `model` partition). cores3-asr variant.
-  espressif/esp-sr: "^2.4.0"
+  # esp-sr 2.x targets esp32s3/esp32p4 only (WakeNet9/AFE need the S3 HiFi
+  # SIMD path) — excluded on esp32 (Core2) so `idf.py set-target esp32`'s
+  # dependency resolution doesn't fail outright. CONFIG_STACKCHAN_ASR_ENABLED
+  # stays off on Core2 regardless (sdkconfig.defaults.core2), so no source
+  # in this tree calls into esp-sr on that target either.
+  espressif/esp-sr:
+    version: "^2.4.0"
+    rules:
+      - if: "target not in [esp32]"
