@@ -20,7 +20,12 @@ dependencies:
   # dependency resolution doesn't fail outright. CONFIG_STACKCHAN_ASR_ENABLED
   # stays off on Core2 regardless (sdkconfig.defaults.core2), so no source
   # in this tree calls into esp-sr on that target either.
+  #
+  # Pinned to the exact 2.4.0 patch (not "^2.4.0"): 2.5.0 adds a new
+  # `espressif/esp-dl` dependency (>=3.3.9, ~673 KB linked unconditionally)
+  # that overflows the cores3 ota_0/ota_1 partitions (~4 MB) by ~115 KB.
+  # See TODO.md for the 2.5.0 follow-up.
   espressif/esp-sr:
-    version: "^2.4.0"
+    version: "2.4.0"
     rules:
       - if: "target not in [esp32]"
