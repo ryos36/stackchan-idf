@@ -3,10 +3,11 @@
 # NS4168 speaker + PDM mic + MPU6886 + BM8563。`make build BOARD=core2` で
 # 選択 (TARGET=esp32 は Makefile のボード→ターゲット マップ経由)。
 #
-# 最小プロファイル: アバター + 設定 UI (BLE/Wi-Fi) + jtts (formant/unit)。
-# サーボなし (拡張ベース非対応、かつ ESP32 では G6/G7 が内蔵フラッシュ専用)、
-# 会話 / BLE audio / RTP / カメラ / ASR は全て OFF。sdkconfig.defaults.atoms3
-# の機能ゲート構成を、PSRAM 有り版として踏襲する。
+# プロファイル: アバター + 設定 UI (BLE/Wi-Fi) + jtts (formant/unit) +
+# 会話 (OpenAI Realtime / Gemini Live)。サーボなし (拡張ベース非対応、かつ
+# ESP32 では G6/G7 が内蔵フラッシュ専用)、BLE audio / RTP / カメラ / ASR は
+# 引き続き OFF。sdkconfig.defaults.atoms3 の機能ゲート構成を、PSRAM 有り版
+# として踏襲する。
 
 # --- Flash -----------------------------------------------------------------
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
@@ -20,9 +21,14 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_core2.csv"
 
 # --- 機能ゲート ---------------------------------------------------------------
 # main/Kconfig.projbuild の定義。効き先は main/app_main.cpp と
-# main/CMakeLists.txt:62-77。デフォルト y のものだけ明示的に n にする
-# (CONVERSATION / AUDIO_STREAM / WIFI_AUDIO / ESPNOW_REMOTE)。
-CONFIG_STACKCHAN_CONVERSATION_ENABLED=n
+# main/CMakeLists.txt:62-77。デフォルト y のうち CONVERSATION だけ残し、
+# 他 (AUDIO_STREAM / WIFI_AUDIO / ESPNOW_REMOTE) は明示的に n にする。
+# CONVERSATION 有効化に伴い、送信タスクのスタックは ESP32 では内部 RAM
+# から確保するよう components/conversation 側で分岐済み
+# (openai_realtime_client.cpp / gemini_live_client.cpp /
+# xiaozhi_client.cpp — PSRAM スタックは Wi-Fi 使用タスクで ESP32 は
+# 非推奨のため)。
+CONFIG_STACKCHAN_CONVERSATION_ENABLED=y
 CONFIG_STACKCHAN_AUDIO_STREAM_ENABLED=n
 CONFIG_STACKCHAN_WIFI_AUDIO_ENABLED=n
 # ESP-NOW リモコンはサーボ駆動が目的の機能。サーボが無い本プロファイルでは

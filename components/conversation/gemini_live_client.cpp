@@ -26,6 +26,8 @@
 #include "psram_allocator.hpp"
 #include "ws_extra_headers.hpp"
 
+#include "board/task_stack_caps.hpp"
+
 namespace stackchan::conversation {
 
 namespace {
@@ -131,10 +133,12 @@ public:
             return tl::unexpected{ConversationError::OutOfMemory};
         }
         sender_should_exit_.store(false, std::memory_order_relaxed);
+        // Sender stack: PSRAM on ESP32-S3, internal RAM on ESP32 (Core2) —
+        // see board/task_stack_caps.hpp for why.
         if (xTaskCreatePinnedToCoreWithCaps(&Impl::sender_trampoline, "gemini_tx",
                                             kSenderTaskStack, this, kSenderTaskPrio,
                                             &sender_task_, kSenderTaskCore,
-                                            MALLOC_CAP_SPIRAM) != pdPASS) {
+                                            stackchan::board::kLargeTaskStackCaps) != pdPASS) {
             teardown();
             return tl::unexpected{ConversationError::TransportInit};
         }

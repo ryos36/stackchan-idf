@@ -25,6 +25,8 @@
 #include "avatar/expression.hpp"
 #include "settings_sinks.hpp"
 
+#include "board/task_stack_caps.hpp"
+
 #include "esp_afe_config.h"
 #include "esp_afe_sr_iface.h"
 #include "esp_afe_sr_models.h"
@@ -193,19 +195,23 @@ void asr_probe_run(stackchan::app::SharedState& state) {
     ESP_LOGI(kTag, "AFE: feed_chunk=%d ch=%d samp_rate=%d", g_afe->get_feed_chunksize(g_afe_data),
              g_afe->get_channel_num(g_afe_data), g_afe->get_samp_rate(g_afe_data));
 
-    // タスク スタックは PSRAM に置き、内部RAMは BLE/httpd/WiFi の通信系に温存する。
-    // feed/detect は flash 操作をしない (WakeNet モデルは PSRAM) ので PSRAM スタックで
-    // 安全。TCB は内部RAM (BSS)。
+    // タスク スタックは PSRAM に置き、内部RAMは BLE/httpd/WiFi の通信系に温存する
+    // (ESP32-S3)。feed/detect は flash 操作をしない (WakeNet モデルは PSRAM) ので
+    // PSRAM スタックで安全。ESP32 では内部RAMを使う (board/task_stack_caps.hpp
+    // 参照。esp-sr は ESP32 をターゲットから除外しているため実際には無関係だが、
+    // 他の呼び出し箇所と同じヘルパーに揃える)。TCB は内部RAM (BSS)。
     static StaticTask_t s_feed_tcb, s_det_tcb;
     constexpr int kFeedStack = 4096, kDetStack = 6144;
-    auto* feed_stk = static_cast<StackType_t*>(heap_caps_malloc(kFeedStack, MALLOC_CAP_SPIRAM));
-    auto* det_stk = static_cast<StackType_t*>(heap_caps_malloc(kDetStack, MALLOC_CAP_SPIRAM));
+    auto* feed_stk = static_cast<StackType_t*>(
+        heap_caps_malloc(kFeedStack, stackchan::board::kLargeTaskStackCaps));
+    auto* det_stk = static_cast<StackType_t*>(
+        heap_caps_malloc(kDetStack, stackchan::board::kLargeTaskStackCaps));
     if (feed_stk != nullptr && det_stk != nullptr) {
         xTaskCreateStaticPinnedToCore(feed_task, "asr_feed", kFeedStack, nullptr, 5, feed_stk,
                                       &s_feed_tcb, 0);
         xTaskCreateStaticPinnedToCore(detect_task, "asr_det", kDetStack, nullptr, 5, det_stk,
                                       &s_det_tcb, 1);
-    } else {  // PSRAM 確保失敗時は内部RAMにフォールバック
+    } else {  // 確保失敗時は既定 caps (内部RAM) の動的生成にフォールバック
         xTaskCreatePinnedToCore(feed_task, "asr_feed", kFeedStack, nullptr, 5, nullptr, 0);
         xTaskCreatePinnedToCore(detect_task, "asr_det", kDetStack, nullptr, 5, nullptr, 1);
     }

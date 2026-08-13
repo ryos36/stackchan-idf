@@ -9,6 +9,7 @@ idf_component_register(
     REQUIRES
         tl_expected
     PRIV_REQUIRES
+        board
         esp_websocket_client
         esp_audio_codec
         json

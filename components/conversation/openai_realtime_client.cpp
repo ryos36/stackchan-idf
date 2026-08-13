@@ -25,6 +25,8 @@
 #include "psram_allocator.hpp"
 #include "ws_extra_headers.hpp"
 
+#include "board/task_stack_caps.hpp"
+
 namespace stackchan::conversation {
 
 namespace {
@@ -191,11 +193,12 @@ public:
         sender_should_exit_.store(false, std::memory_order_relaxed);
         // Allocate the sender's 6 KiB stack from PSRAM via WithCaps — keeps
         // internal RAM available for mbedtls's transient RSA / AES contexts
-        // during TLS handshake (those can be 8-16 KiB each).
+        // during TLS handshake (those can be 8-16 KiB each). ESP32 (Core2)
+        // uses internal RAM instead — see board/task_stack_caps.hpp for why.
         if (xTaskCreatePinnedToCoreWithCaps(&Impl::sender_trampoline, "rt_audio_tx",
                                             kSenderTaskStack, this, kSenderTaskPrio,
                                             &sender_task_, kSenderTaskCore,
-                                            MALLOC_CAP_SPIRAM) != pdPASS) {
+                                            stackchan::board::kLargeTaskStackCaps) != pdPASS) {
             teardown();
             return tl::unexpected{ConversationError::TransportInit};
         }

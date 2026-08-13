@@ -28,6 +28,8 @@
 #include <wifi_config_service/mcp_events.hpp>
 #include <wifi_config_service/wifi_config_service.hpp>
 
+#include "board/task_stack_caps.hpp"
+
 namespace stackchan::app::settings_sinks {
 
 namespace {
@@ -186,12 +188,14 @@ std::uint16_t read_speaker_volume_pct()
 void start_say_worker(std::string_view kana_utf8)
 {
     auto* owned = new std::string{kana_utf8};
-    // 12 KiB stack in PSRAM. See the long rationale on the original
-    // /mcp/say wiring (steady-state internal-RAM largest is ~10 KiB after
-    // conversation_task TLS, so an internal-RAM 12 KiB stack alloc would
-    // silently fail). The worker only touches PSRAM-friendly surfaces
-    // (jtts buffers, PCM vector, M5.Speaker.playRaw enqueue).
-    constexpr UBaseType_t kCaps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    // 12 KiB stack. PSRAM on ESP32-S3 (steady-state internal-RAM largest is
+    // ~10 KiB after conversation_task TLS, so an internal-RAM 12 KiB stack
+    // alloc would silently fail there); internal RAM on ESP32 (Core2) —
+    // see board/task_stack_caps.hpp for why ESP32 can't use PSRAM here.
+    // On Core2 with conversation active this alloc can still fail under the
+    // same internal-RAM pressure (RA9 in the Core2 conversation plan) — the
+    // failure path below just logs and skips the utterance, no crash.
+    constexpr UBaseType_t kCaps = stackchan::board::kLargeTaskStackCaps;
     const BaseType_t rc = xTaskCreatePinnedToCoreWithCaps(
         +[](void* arg) {
             std::unique_ptr<std::string> kana_text{static_cast<std::string*>(arg)};
@@ -230,8 +234,11 @@ void start_say_worker(std::string_view kana_utf8)
         // 12 KiB stack alloc here starves render (observed 2026-06-07).
         "say_worker", 12 * 1024, owned, tskIDLE_PRIORITY + 2, nullptr, 0, kCaps);
     if (rc != pdPASS) {
-        ESP_LOGE(kTag, "say worker task create FAILED (PSRAM largest=%u)",
-                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+        // Report the largest free block in the same caps we just tried to
+        // allocate from (PSRAM on ESP32-S3, internal RAM on ESP32) so the
+        // number in the log matches the failure it explains.
+        ESP_LOGE(kTag, "say worker task create FAILED (largest free=%u)",
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(kCaps)));
         delete owned;
     }
 }

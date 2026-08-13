@@ -22,6 +22,8 @@
 
 #include "config_service/config_service.hpp"
 
+#include "board/task_stack_caps.hpp"
+
 namespace stackchan::app::audio_stream {
 
 namespace {
@@ -549,9 +551,12 @@ void start(SharedState& state, bool conversation_enabled)
     //   → consumer here (core 1) → drain promptly so NimBLE never blocks
     // When this consumer is starved the producer side back-pressures
     // and BLE throughput collapses from ~22 KiB/s to ~10 KiB/s.
+    // Stack caps: PSRAM on ESP32-S3, internal RAM on ESP32 (Core2) — see
+    // board/task_stack_caps.hpp for why. (The stream buffer above is data,
+    // not a task stack, so it keeps MALLOC_CAP_SPIRAM unconditionally.)
     if (xTaskCreatePinnedToCoreWithCaps(worker_task, "audio-stream", 8192, nullptr,
                                          tskIDLE_PRIORITY + 7, &g_worker, 1,
-                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+                                         stackchan::board::kLargeTaskStackCaps) != pdPASS) {
         ESP_LOGE(kTag, "xTaskCreate audio-stream failed");
         return;
     }
