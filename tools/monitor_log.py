@@ -3,9 +3,10 @@
 # SPDX-License-Identifier: BSL-1.0
 """Non-interactive serial log capture.
 
-Resets the target via DTR/RTS (matching esptool's default-reset sequence),
-then reads stdout from the device for a fixed duration. Useful from a
-non-TTY harness where idf.py monitor refuses to run.
+Resets the target via RTS (matching esptool's HardReset sequence, i.e. a
+normal app boot rather than bootloader entry), then reads stdout from the
+device for a fixed duration. Useful from a non-TTY harness where idf.py
+monitor refuses to run.
 
 Usage:
     python tools/monitor_log.py [--port /dev/ttyACM0] [--seconds 8]
@@ -28,10 +29,15 @@ def main() -> int:
     args = ap.parse_args()
 
     with serial.Serial(args.port, args.baud, timeout=0.2) as ser:
-        # esptool default-reset: DTR=RST, RTS=BOOT.
-        ser.setDTR(False); ser.setRTS(True);  time.sleep(0.1)
-        ser.setDTR(True);  ser.setRTS(False); time.sleep(0.1)
-        ser.setDTR(False); ser.setRTS(False)
+        # esptool's HardReset (not ClassicReset): only toggle RTS (EN).
+        # DTR (IO0) stays False/high throughout so the chip boots the app
+        # normally. The previous DTR+RTS dance here was esptool's
+        # ClassicReset sequence, which is for *entering* the ROM
+        # downloader before a flash write, not for a normal app boot —
+        # it left the device stuck at "waiting for download".
+        ser.setDTR(False)
+        ser.setRTS(True);  time.sleep(0.1)
+        ser.setRTS(False)
 
         end = time.time() + args.seconds
         while time.time() < end:
