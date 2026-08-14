@@ -4,6 +4,7 @@
 #include "conversation/gemini_live_client.hpp"
 
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -64,6 +65,24 @@ struct AudioChunk {
     std::uint16_t len_samples;  // PCM16 little-endian samples
     std::int16_t data[];        // [len_samples]
 };
+
+// Recursively upper-cases every JSON-Schema "type" value in a cJSON tree,
+// in place. Google's OpenAPI 3.0.3 `parameters` field expects
+// "OBJECT"/"STRING"/... while our tool factories write lowercase JSON
+// Schema for OpenAI compatibility (see send_setup()'s use of this).
+void uppercase_schema_types(cJSON* node)
+{
+    if (node == nullptr) return;
+    for (cJSON* child = node->child; child != nullptr; child = child->next) {
+        if (cJSON_IsString(child) && child->string != nullptr &&
+            std::strcmp(child->string, "type") == 0) {
+            for (char* p = child->valuestring; *p != '\0'; ++p) {
+                *p = static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
+            }
+        }
+        uppercase_schema_types(child);
+    }
+}
 
 } // namespace
 
@@ -554,12 +573,17 @@ private:
                 cJSON_AddStringToObject(d, "description", t.description.c_str());
                 cJSON* params = cJSON_Parse(t.parameters_json.c_str());
                 if (params != nullptr) {
-                    // `parameters` expects Google's OpenAPI 3.0.3 subset
-                    // (uppercase `"OBJECT"`/`"STRING"` etc). Our tool
-                    // factories use lowercase JSON Schema for OpenAI
-                    // compatibility, so feed them through the mutually-
-                    // exclusive `parametersJsonSchema` field instead.
-                    cJSON_AddItemToObject(d, "parametersJsonSchema", params);
+                    // The mutually-exclusive `parametersJsonSchema` field
+                    // (lowercase JSON Schema, no case conversion needed)
+                    // looked like the natural fit for our OpenAI-compatible
+                    // tool factories, but Live API models silently drop call
+                    // arguments when it's used (confirmed upstream:
+                    // googleapis/python-genai#1147). `parameters` (Google's
+                    // OpenAPI 3.0.3 subset) works, but expects uppercase
+                    // type names ("OBJECT"/"STRING"/...), so upper-case
+                    // every "type" in the tree before attaching it here.
+                    uppercase_schema_types(params);
+                    cJSON_AddItemToObject(d, "parameters", params);
                 }
                 cJSON_AddItemToArray(decls, d);
             }
