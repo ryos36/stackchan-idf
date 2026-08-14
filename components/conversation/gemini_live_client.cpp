@@ -770,6 +770,15 @@ private:
             ConversationEvent ev{};
             ev.type = ConversationEventType::AssistantAudioDone;
             emit(ev);
+            // Unlike OpenAI, Gemini's outputTranscription only ever sends
+            // deltas — there is no dedicated "done" message carrying the
+            // full transcript. conv-task accumulates the deltas itself and
+            // only flushes them to the speech balloon on AssistantTextDone
+            // (empty text here means "use what you already accumulated").
+            // Without this, the balloon never updates for Gemini replies.
+            ConversationEvent text_ev{};
+            text_ev.type = ConversationEventType::AssistantTextDone;
+            emit(text_ev);
         }
 
         // generationComplete: model has finished generating audio. Mirror
@@ -779,6 +788,11 @@ private:
             ConversationEvent ev{};
             ev.type = ConversationEventType::AssistantAudioDone;
             emit(ev);
+            // See the interrupted branch above: flush the accumulated
+            // outputTranscription deltas to the balloon now.
+            ConversationEvent text_ev{};
+            text_ev.type = ConversationEventType::AssistantTextDone;
+            emit(text_ev);
         }
         // turnComplete: server ready for the next user turn. Drop back to
         // Listening so push_audio starts enqueueing mic chunks again — its
