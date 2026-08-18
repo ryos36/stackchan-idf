@@ -300,14 +300,41 @@ public:
     //  - on_complete: invoked once when the balloon finishes (after hold or
     //    after a marquee pass). Fired from the render task; the
     //    implementation must be cheap and thread-safe.
+    //  - streaming: true suppresses the avatar's auto-completion (see
+    //    update_balloon_text()) — pass true for the first fragment of a
+    //    reply that will keep growing.
     void set_balloon_text(std::string_view text,
                           std::uint32_t hold_ms = 0,
-                          BalloonCompletionCallback on_complete = {})
+                          BalloonCompletionCallback on_complete = {},
+                          bool streaming = false)
     {
         std::lock_guard lock{balloon_mutex_};
         balloon_text_.assign(text);
         balloon_hold_ms_ = hold_ms;
         balloon_callback_ = std::move(on_complete);
+        balloon_is_update_ = false;
+        balloon_streaming_ = streaming;
+        balloon_version_.fetch_add(1, std::memory_order_release);
+        balloon_visible_.store(true, std::memory_order_release);
+    }
+
+    // Like set_balloon_text(), but for a balloon already on screen: grows
+    // its text without restarting the avatar's display clock (hold timer /
+    // marquee position). Used to reveal reply text as it streams in —
+    // calling set_balloon_text() per fragment would reset the marquee to
+    // its start on every call and it would never appear to move. hold_ms /
+    // completion callback are left as whatever the last set_balloon_text()
+    // established.
+    //  - streaming: true while more fragments are still expected (keeps
+    //    auto-completion suppressed); false for the final update (e.g.
+    //    AssistantTextDone) — completion is then judged normally against
+    //    however much of the display clock has already elapsed.
+    void update_balloon_text(std::string_view text, bool streaming)
+    {
+        std::lock_guard lock{balloon_mutex_};
+        balloon_text_.assign(text);
+        balloon_is_update_ = true;
+        balloon_streaming_ = streaming;
         balloon_version_.fetch_add(1, std::memory_order_release);
         balloon_visible_.store(true, std::memory_order_release);
     }
@@ -319,6 +346,8 @@ public:
         balloon_text_.clear();
         balloon_hold_ms_ = 0;
         balloon_callback_ = nullptr;
+        balloon_is_update_ = false;
+        balloon_streaming_ = false;
         balloon_version_.fetch_add(1, std::memory_order_release);
         balloon_visible_.store(false, std::memory_order_release);
     }
@@ -336,6 +365,8 @@ public:
             }
             balloon_text_.clear();
             balloon_hold_ms_ = 0;
+            balloon_is_update_ = false;
+            balloon_streaming_ = false;
             cb = std::move(balloon_callback_);
             balloon_callback_ = nullptr;
             balloon_version_.fetch_add(1, std::memory_order_release);
@@ -358,11 +389,19 @@ public:
     }
 
     // Copies the current text + hold time into the supplied outputs.
-    void snapshot_balloon(std::string& text_out, std::uint32_t& hold_ms_out) const
+    // is_update_out: true if this change came from update_balloon_text()
+    // (render_task should call avatar.update_balloon_text(), preserving the
+    // display clock, instead of avatar.set_balloon_text()).
+    // streaming_out: forwarded to the avatar call either way — see
+    // set_balloon_text() / update_balloon_text() above.
+    void snapshot_balloon(std::string& text_out, std::uint32_t& hold_ms_out, bool& is_update_out,
+                          bool& streaming_out) const
     {
         std::lock_guard lock{balloon_mutex_};
         text_out = balloon_text_;
         hold_ms_out = balloon_hold_ms_;
+        is_update_out = balloon_is_update_;
+        streaming_out = balloon_streaming_;
     }
 
     // --- Versioned slots (VersionedValue facade — see the template above) --
@@ -431,6 +470,12 @@ private:
     BalloonCompletionCallback balloon_callback_{};
     std::atomic<std::uint32_t> balloon_version_{0};
     std::atomic<bool> balloon_visible_{false};
+    // Set by update_balloon_text(), cleared by set_balloon_text() / clear_balloon()
+    // / notify_balloon_complete() — see snapshot_balloon()'s is_update_out.
+    bool balloon_is_update_{false};
+    // See snapshot_balloon()'s streaming_out / Avatar::update_balloon_text()'s
+    // streaming parameter.
+    bool balloon_streaming_{false};
 
     VersionedValue<std::string> face_config_;
     VersionedValue<std::string> lt_config_;

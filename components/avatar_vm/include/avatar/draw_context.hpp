@@ -41,6 +41,21 @@ struct DrawContext {
     // (i.e. hold time elapsed for short text, or one marquee cycle for long
     // text). The render task polls this and notifies the application.
     bool balloon_done{false};
+    // True while more text is still expected (a reply streaming in).
+    // Suppresses the balloon_done check below so the balloon doesn't
+    // auto-complete (and get hidden by the render task) mid-stream —
+    // scrolling still runs normally against balloon_set_ms throughout.
+    // Cleared once the caller knows the text is final.
+    bool balloon_streaming{false};
+    // Sticky version of balloon_streaming: set the moment streaming starts,
+    // never cleared back to false until a fresh (non-streaming) balloon
+    // replaces this one. Unlike balloon_streaming, this stays true after
+    // the reply finishes — it gates which rendering mode balloon.cpp uses
+    // (see there), so a balloon that streamed in never switches to the
+    // static-centered layout even once its final text turns out to be
+    // short: that switch would jump instead of using the same continuous
+    // position function throughout.
+    bool balloon_ever_streamed{false};
 };
 
 } // namespace stackchan::avatar

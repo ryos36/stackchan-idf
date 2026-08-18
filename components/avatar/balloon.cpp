@@ -23,9 +23,6 @@ constexpr std::int16_t kSmallPanelH = 22; // for 12-px font
 
 // Marquee tuning.
 constexpr std::int32_t kScrollSpeedPxPerSec = 60;
-// Gap (px) of "empty space" between the trailing edge of one pass and the
-// leading edge of the next so the user perceives the message restarting.
-constexpr std::int32_t kRepeatGapPx = 60;
 
 // Default minimum display time for short (non-scrolling) text. The application
 // can override with `Avatar::set_balloon_text(text, hold_ms)`.
@@ -71,8 +68,14 @@ void draw_balloon(RichCanvas& canvas, DrawContext& ctx)
     const std::int32_t mid_y = panel_y + panel_h / 2;
     const std::uint32_t elapsed_ms = ctx.now_ms - ctx.balloon_set_ms;
 
-    if (text_w <= inner_w) {
+    if (!ctx.balloon_ever_streamed && text_w <= inner_w) {
         // Text fits — static centered. Mark done after the configured hold.
+        // Gated on balloon_ever_streamed (sticky), not just balloon_streaming
+        // (instantaneous): a reply that streamed in must keep using the
+        // marquee's position formula below for its entire life, even after
+        // streaming ends and the final text turns out to be short. Switching
+        // rendering modes at that point — to this centered layout — would
+        // still jump, just one frame later than switching mid-stream would.
         canvas.setTextDatum(lgfx::textdatum_t::middle_center);
         canvas.drawString(text.c_str(), panel_x + panel_w / 2, mid_y);
 
@@ -85,28 +88,36 @@ void draw_balloon(RichCanvas& canvas, DrawContext& ctx)
         return;
     }
 
-    // Marquee: text starts just past the right inner edge and scrolls left.
-    // A single "pass" travels `text_w + inner_w` pixels (entry + traverse +
-    // exit). One full cycle adds `kRepeatGapPx` so the message restarts with
-    // a perceivable gap.
-    const std::int32_t one_pass_px = text_w + inner_w;
-    const std::int32_t cycle_px = one_pass_px + kRepeatGapPx;
-    const std::int32_t offset_in_cycle =
-        static_cast<std::int32_t>(elapsed_ms) * kScrollSpeedPxPerSec / 1000 % cycle_px;
-    const std::int32_t x = inner_x + inner_w - offset_in_cycle;
+    // Marquee: text starts just past the right inner edge and scrolls left
+    // until it reaches a resting point, then holds there before the balloon
+    // completes — it never disappears mid-motion:
+    //  - long text (text_w > inner_w): rests once its tail has fully
+    //    entered (left edge at inner_x + inner_w - text_w), leaving the
+    //    trailing portion flush against the right edge.
+    //  - short text (text_w <= inner_w — only reachable here once a balloon
+    //    has streamed; see balloon_ever_streamed above): resting flush
+    //    right after barely moving read as an odd, half-finished slide, so
+    //    it keeps going until flush against the LEFT edge instead.
+    // Both are "whichever needs more travel", so one formula covers both,
+    // and while streaming (text_w still growing) the transition between
+    // them stays continuous — the cap only ever loosens as text_w grows.
+    const std::int32_t travel_px = std::max(text_w, inner_w);
+    const std::int32_t offset =
+        std::min(static_cast<std::int32_t>(elapsed_ms) * kScrollSpeedPxPerSec / 1000, travel_px);
+    const std::int32_t x = inner_x + inner_w - offset;
 
     canvas.setClipRect(inner_x, panel_y, inner_w, panel_h);
     canvas.setTextDatum(lgfx::textdatum_t::middle_left);
     canvas.drawString(text.c_str(), x, mid_y);
     canvas.clearClipRect();
 
-    // Mark done once the message has scrolled across at least once
-    // (or the caller-requested hold time has elapsed, whichever is longer).
-    const std::uint32_t one_pass_ms =
-        static_cast<std::uint32_t>(one_pass_px) * 1000u /
-        static_cast<std::uint32_t>(kScrollSpeedPxPerSec);
-    const std::uint32_t complete_at = std::max(ctx.balloon_hold_ms, one_pass_ms);
-    if (elapsed_ms >= complete_at) {
+    // Mark done once the resting point above has been held for the hold
+    // duration (or the caller-requested hold time, whichever is longer).
+    const std::uint32_t travel_ms =
+        static_cast<std::uint32_t>(travel_px) * 1000u / static_cast<std::uint32_t>(kScrollSpeedPxPerSec);
+    const std::uint32_t hold_ms = std::max(ctx.balloon_hold_ms, kDefaultStaticHoldMs);
+    const std::uint32_t complete_at = travel_ms + hold_ms;
+    if (!ctx.balloon_streaming && elapsed_ms >= complete_at) {
         ctx.balloon_done = true;
     }
     canvas.end_group();

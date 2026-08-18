@@ -844,9 +844,31 @@ private:
             }
             break;
 
-        case conv::ConversationEventType::AssistantTextDelta:
+        case conv::ConversationEventType::AssistantTextDelta: {
+            // Show the balloon as text streams in, rather than waiting for
+            // AssistantTextDone (generationComplete) to reveal it all at
+            // once — Gemini's outputTranscription arrives as deltas over
+            // the course of generation, not a single final chunk. The
+            // first fragment starts the balloon fresh; later fragments
+            // grow it via update_balloon_text() so the marquee/hold timer
+            // keeps running instead of restarting on every fragment (see
+            // SharedState::update_balloon_text()).
+            const bool first_fragment = assistant_text_.empty();
             assistant_text_ += ev.text;
+            if (!assistant_text_.empty()) {
+                if (first_fragment) {
+                    // streaming=true suppresses the balloon's "done" check
+                    // entirely while the reply is still growing, so there's
+                    // no hold-timer value to tune here — see
+                    // SharedState::set_balloon_text() / balloon.cpp.
+                    state_.set_balloon_text(assistant_text_, /*hold_ms=*/0, /*on_complete=*/{},
+                                             /*streaming=*/true);
+                } else {
+                    state_.update_balloon_text(assistant_text_, /*streaming=*/true);
+                }
+            }
             break;
+        }
 
         case conv::ConversationEventType::AssistantTextDone:
             if (!ev.text.empty()) {
@@ -854,7 +876,19 @@ private:
             }
             ESP_LOGI(kTag, "assistant: %s", assistant_text_.c_str());
             if (!assistant_text_.empty()) {
-                state_.set_balloon_text(assistant_text_, /*hold_ms=*/0);
+                // If AssistantTextDelta already put something on screen
+                // (Gemini's usual path), just settle the final text in
+                // place — set_balloon_text() here would restart the
+                // marquee from the right edge, undoing the progressive
+                // reveal the user just watched. A provider whose "done"
+                // event carries the only text (no deltas shown yet) still
+                // gets a normal fresh display. streaming=false lets the
+                // "done" check start evaluating from here on.
+                if (state_.balloon_visible()) {
+                    state_.update_balloon_text(assistant_text_, /*streaming=*/false);
+                } else {
+                    state_.set_balloon_text(assistant_text_, /*hold_ms=*/0);
+                }
             }
             break;
 

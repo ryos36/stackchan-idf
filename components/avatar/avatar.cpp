@@ -166,13 +166,37 @@ void Avatar::reset_face_bytecode() noexcept
     impl_->load_default();
 }
 
-void Avatar::set_balloon_text(std::string_view text, std::uint32_t hold_ms)
+void Avatar::set_balloon_text(std::string_view text, std::uint32_t hold_ms, bool streaming)
 {
     auto& ctx = impl_->context();
     ctx.balloon_text = std::string{text};
     ctx.balloon_hold_ms = hold_ms;
     ctx.balloon_done = false;
     ctx.balloon_set_ms = ctx.now_ms;
+    ctx.balloon_streaming = streaming;
+    ctx.balloon_ever_streamed = streaming;
+}
+
+void Avatar::update_balloon_text(std::string_view text, bool streaming) noexcept
+{
+    auto& ctx = impl_->context();
+    if (!ctx.balloon_text.has_value()) {
+        // Nothing showing yet — same as a fresh set_balloon_text(text).
+        ctx.balloon_text = std::string{text};
+        ctx.balloon_hold_ms = 0;
+        ctx.balloon_done = false;
+        ctx.balloon_set_ms = ctx.now_ms;
+        ctx.balloon_streaming = streaming;
+        ctx.balloon_ever_streamed = streaming;
+        return;
+    }
+    // balloon_set_ms / balloon_hold_ms / balloon_done stay put — the marquee
+    // (and the hold timer) keep running against the original start time.
+    ctx.balloon_text = std::string{text};
+    ctx.balloon_streaming = streaming;
+    if (streaming) {
+        ctx.balloon_ever_streamed = true;
+    }
 }
 
 void Avatar::clear_balloon() noexcept
@@ -182,6 +206,7 @@ void Avatar::clear_balloon() noexcept
     impl_->request_full_repaint();
     ctx.balloon_hold_ms = 0;
     ctx.balloon_done = false;
+    ctx.balloon_streaming = false;
 }
 
 bool Avatar::is_balloon_done() const noexcept

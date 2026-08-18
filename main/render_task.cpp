@@ -224,8 +224,17 @@ void render_task_entry(void* arg)
         if (balloon_version != last_balloon_version) {
             if (args.state->balloon_visible()) {
                 std::uint32_t hold_ms = 0;
-                args.state->snapshot_balloon(balloon_scratch, hold_ms);
-                avatar.set_balloon_text(balloon_scratch, hold_ms);
+                bool is_update = false;
+                bool streaming = false;
+                args.state->snapshot_balloon(balloon_scratch, hold_ms, is_update, streaming);
+                if (is_update) {
+                    // Grows the text in place — leaves the avatar's hold
+                    // timer / marquee position alone (see
+                    // SharedState::update_balloon_text()).
+                    avatar.update_balloon_text(balloon_scratch, streaming);
+                } else {
+                    avatar.set_balloon_text(balloon_scratch, hold_ms, streaming);
+                }
                 balloon_pending = true;
             } else {
                 avatar.clear_balloon();

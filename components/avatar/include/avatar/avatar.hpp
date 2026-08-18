@@ -38,8 +38,24 @@ public:
     void set_face_tuning(const FaceTuning& tuning) noexcept;
     // Show `text` in the balloon. `hold_ms` overrides the default display
     // time (0 = use balloon defaults: short text holds for a few seconds,
-    // long text plays one full marquee pass).
-    void set_balloon_text(std::string_view text, std::uint32_t hold_ms = 0);
+    // long text plays one full marquee pass). `streaming=true` suppresses
+    // auto-completion (see update_balloon_text()) — use for the first
+    // fragment of a reply that will keep growing.
+    void set_balloon_text(std::string_view text, std::uint32_t hold_ms = 0, bool streaming = false);
+    // Replace the balloon's text without resetting the display clock —
+    // for a balloon already on screen, growing it incrementally (e.g. as
+    // reply text streams in). set_balloon_text() would restart the hold
+    // timer and marquee position on every call, which — called once per
+    // fragment — never lets the marquee move (it keeps re-entering at the
+    // same near-zero offset). If no balloon is currently showing, behaves
+    // like set_balloon_text(text) (starts the clock, since there's nothing
+    // to preserve).
+    // `streaming`: true while more fragments are still expected (keeps
+    // auto-completion suppressed); false once this is the final update
+    // (e.g. AssistantTextDone) — completion is then judged normally from
+    // here on, against however much of the display clock has already
+    // elapsed.
+    void update_balloon_text(std::string_view text, bool streaming) noexcept;
     void clear_balloon() noexcept;
     // True once the current balloon has been fully displayed (hold elapsed
     // or one marquee pass completed). Stays true until the next
