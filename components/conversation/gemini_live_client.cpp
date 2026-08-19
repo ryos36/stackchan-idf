@@ -84,6 +84,26 @@ void uppercase_schema_types(cJSON* node)
     }
 }
 
+// Bounded substring search. rx_buffer_ (the only thing ever passed here as
+// `haystack`) is a plain heap_caps_malloc scratch buffer that is never
+// null-terminated past the message length — std::strstr relies on a NUL
+// byte to know where to stop, so it can run past the real message into
+// whatever uninitialized heap memory follows. Confirmed root cause of a
+// task-watchdog trip (another task starved while this scanned garbage
+// looking for a NUL that might be far away, or never came within the
+// buffer at all). Scans at most `haystack_len` bytes.
+const char* bounded_strstr(const char* haystack, std::size_t haystack_len, const char* needle)
+{
+    const std::size_t needle_len = std::strlen(needle);
+    if (needle_len == 0 || needle_len > haystack_len) return nullptr;
+    for (std::size_t i = 0; i + needle_len <= haystack_len; ++i) {
+        if (std::memcmp(haystack + i, needle, needle_len) == 0) {
+            return haystack + i;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace
 
 class GeminiLiveClient::Impl {
@@ -640,7 +660,7 @@ private:
         // Audio (inlineData) is skipped — it's multi-KB base64 that dwarfs
         // everything else and is already captured by the per-100-chunk
         // audio_send heartbeat.
-        if (rx_log_count_ < 5 && std::strstr(json, "\"inlineData\"") == nullptr) {
+        if (rx_log_count_ < 5 && bounded_strstr(json, len, "\"inlineData\"") == nullptr) {
             const std::size_t snip = std::min<std::size_t>(len, 384);
             ESP_LOGI(kTag, "rx[%u/%uB]: %.*s%s",
                      rx_log_count_, static_cast<unsigned>(len),
