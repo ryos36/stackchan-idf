@@ -657,6 +657,7 @@ private:
         assistant_pcm_.reserve(speaker_sample_rate_ * 20); // ~20 s headroom
         assistant_text_.clear();
         audio_complete_ = false;
+        pcm_overflow_ = false;
         // Drop any barge-in tap that arrived during the just-finished turn so it
         // can't immediately re-trigger now that we're listening again.
         state_.barge_in_request.store(false, std::memory_order_relaxed);
@@ -863,6 +864,14 @@ private:
                 const std::int64_t recv = now_us();
                 if (ev.emit_us > 0) {
                     recv_lag_us_.record(static_cast<float>(recv - ev.emit_us));
+                }
+                if (assistant_pcm_.size() + ev.audio->size() > assistant_pcm_.capacity()) {
+                    if (!pcm_overflow_) {
+                        ESP_LOGW(kTag, "assistant_pcm_ full at %u samples, dropping the rest",
+                                 static_cast<unsigned>(assistant_pcm_.size()));
+                        pcm_overflow_ = true;
+                    }
+                    return;
                 }
                 assistant_pcm_.insert(assistant_pcm_.end(), ev.audio->begin(), ev.audio->end());
                 pending_chunks_.push_back({assistant_pcm_.size(), recv});
@@ -1181,6 +1190,13 @@ private:
     // with the arrival rate; a near-zero lag means the speaker is the
     // bottleneck (or we're caught up).
     conv::Stats<float> pcm_lag_samples_;
+    // assistant_pcm_.reserve() in enter_listening() only ever grows (clear()
+    // keeps capacity), so once it reaches its ~20 s headroom, capacity()
+    // never changes again. Guards the insert in AssistantAudioChunk so a
+    // reply longer than that is dropped instead of forcing a PSRAM
+    // reallocation — logged once per turn so a cutoff here (vs. a supply
+    // problem elsewhere) is distinguishable in the log.
+    bool pcm_overflow_{false};
 };
 
 void conversation_task_entry(void* arg)
