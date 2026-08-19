@@ -911,6 +911,29 @@ private:
             break;
 
         case conv::ConversationEventType::ResponseDone:
+            // turnComplete always arrives eventually — unlike generationComplete
+            // / interrupted, which can fire (setting audio_complete_ = true
+            // unconditionally in the AssistantAudioDone handler) without local_
+            // ever having left Listening, e.g. a turn cut short before any
+            // modelTurn arrives. That leaves audio_complete_ stuck true, since
+            // enter_listening() (which resets it) only runs when local_ actually
+            // leaves Listening.
+            //
+            // Only clean it up when local_ == Listening: that's the specific
+            // case where the true has nothing left to do (service_playback(),
+            // the only reader, only runs while Speaking) and would otherwise
+            // survive to falsely short-circuit the NEXT turn's playback. Do
+            // NOT reset while Thinking/Speaking — turnComplete can legitimately
+            // arrive before local playback has caught up, and audio_complete_
+            // is exactly what service_playback() is still waiting to read to
+            // detect that turn's own natural completion. Wiping it here would
+            // permanently stick local_ in Speaking, since AssistantAudioDone
+            // (the only thing that sets it) has already fired once for this
+            // turn and won't fire again. (First tried resetting unconditionally
+            // — confirmed on hardware to cause exactly that stuck-Speaking case.)
+            if (local_ == Local::Listening) {
+                audio_complete_ = false;
+            }
             // The response that carried a tool call ends here, but a follow-up
             // response (the model's actual reply) is still coming after we
             // submit the tool result — stay in Thinking and wait for it.
