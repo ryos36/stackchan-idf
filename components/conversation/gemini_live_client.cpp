@@ -144,6 +144,20 @@ public:
         audio_seq_ = 0;
         tx_evicted_total_.store(0, std::memory_order_relaxed);
         last_evict_log_ms_ = 0;
+        // Every fresh WebSocket session (initial connect or a reconnect
+        // after e.g. a 1007/1008/1011 close) starts here — this same Impl
+        // instance is reused across reconnects (conversation_task's
+        // connect() just calls client_->start() again on the same client_),
+        // so member state doesn't reset itself. If the PREVIOUS session died
+        // mid-turn — modelTurn had already arrived (setting this true) but
+        // turnComplete never did, because the connection dropped first —
+        // this would otherwise stay stuck true, silently suppressing
+        // SpeechStopped (and so conv-task's local_ transition out of
+        // Listening) for the entire first reply of the new session, only
+        // self-correcting once that reply's own turnComplete arrives and
+        // resets it. Reset explicitly here so a new session always starts
+        // clean regardless of how the previous one ended.
+        turn_speech_stopped_emitted_ = false;
         set_state(ConversationState::Connecting);
 
         audio_tx_queue_ = xQueueCreate(kAudioTxQueueLen, sizeof(AudioChunk*));
